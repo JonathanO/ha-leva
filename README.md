@@ -4,13 +4,21 @@ Native Home Assistant integration for espresso machines with the Software & Circ
 module running **leva!**. Holds one TCP connection to the module (port 23), streams the
 Status Monitor report (`MCr`, 4 frames/s) and turns it into entities. No MQTT, no add-on.
 
+## Requirements
+
+- ito module with leva! firmware, connected to your network (station mode)
+- The Status Monitor XML that comes with your leva! download
+- Home Assistant with HACS (tested with Home Assistant 2026.2)
+
 ## Install
 
-1. Copy `custom_components/leva` into your HA `config/custom_components/`.
-2. Restart HA, then *Settings → Devices & services → Add integration → leva! (ito)*. Enter
+1. In HACS: *⋮ → Custom repositories*, add `https://github.com/JonathanO/ha-leva` with type
+   *Integration*, then install *leva! (ito)* and restart Home Assistant.
+2. Then *Settings → Devices & services → Add integration → leva! (ito)*. Enter
    the module's IP (give it a fixed DHCP lease) and upload the Status Monitor XML from your
    leva! download (`xml file for status monitor/leva!-XXXXXXXX.xml`).
-3. After a firmware update: *Reconfigure* the integration and upload the new XML. Uploads
+3. After a firmware update, upload the new XML: *Settings → Repairs* shows an entry for the
+   missing file, or use *Reconfigure* on the integration (also works before flashing). Uploads
    are stored in `config/leva/` (copying files there works too).
 
 The integration asks the firmware which XML it uses (`MC?`) and reads field positions,
