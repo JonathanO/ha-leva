@@ -148,7 +148,11 @@ def parse(line: str, fields: list[Field]) -> Frame | None:
         return None
     # ponytail: mode at 4-6 is leva!-specific and has no export name in the XML.
     mode = line[4:7] if line[4:7].isalpha() else None
-    return Frame(line[2] == "*", mode, {f.key: _value(line[f.at:f.at + f.len], f) for f in fields})
+    end = line.rfind("~") if "~" in line else len(line) - 1
+    # A field past the end of the data (shorter frame than the layout expects) is None,
+    # never a number cut in half.
+    return Frame(line[2] == "*", mode, {
+        f.key: _value(line[f.at:f.at + f.len], f) if f.at + f.len <= end else None for f in fields})
 
 
 if __name__ == "__main__":
@@ -173,6 +177,10 @@ if __name__ == "__main__":
     assert v["profile_1"] == "9BAR" and v["profile_3"] is None and v["selected_profile"] == "GEN.LEVER"
     assert v["pcb_sensor"] is None
     assert parse(line[:100] + "X" + line[101:], BUILTIN) is None  # bad checksum
+    short = line[:200] + "~ "
+    short += f"{-sum(short[:-2].encode('latin-1')) & 0xFF:02X}}}"
+    sv = parse(short, BUILTIN).values
+    assert sv["temperature_pid1"] == 90.15 and sv["pressure"] is None and sv["weight"] is None
     standby = parse(build({}, mode="???"), BUILTIN)
     assert standby and standby.mode is None and not standby.brewing
     xml = ('<?xml version="1.0"?><cfg><values><value at="4" len="3" type="string">1:%</value>'

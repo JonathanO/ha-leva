@@ -8,7 +8,7 @@ import time
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -22,22 +22,23 @@ BUILTIN_NAMES = {"leva!-64EA1111", "leva!-65FCB201"}
 EVENT_BREW_FINISHED = "leva_brew_finished"
 
 
-def load_fields(xml_dir: str, name: str | None) -> list[Field]:
-    """Fields from <config>/leva/<name>.xml if installed, else the built-in leva! 3.x table."""
-    path = os.path.join(xml_dir, f"{name}.xml") if name else None
-    if path and os.path.isfile(path):
+def load_fields(xml_dir: str, name: str) -> list[Field]:
+    """Fields from <config>/leva/<name>.xml if installed, else the built-in table for known
+    firmware. Unknown firmware without its XML is refused: a guessed layout gives wrong values."""
+    path = os.path.join(xml_dir, f"{name}.xml")
+    if os.path.isfile(path):
         with open(path, encoding="latin-1") as f:
             fields = fields_from_xml(f.read())
         _LOG.info("Using %s (%d fields)", path, len(fields))
         return fields
-    if name not in BUILTIN_NAMES:
-        _LOG.warning("Firmware reports XML=%s; no %s found, using the built-in leva! 3.x layout. "
-                     "Values may be wrong: copy the XML that came with your firmware there.", name, path)
-    return BUILTIN
+    if name in BUILTIN_NAMES:
+        return BUILTIN
+    raise ConfigEntryError(f"Unknown firmware layout {name}: copy the {name}.xml that came with "
+                           f"your leva! download to {xml_dir}/ and reload the integration")
 
 
 class Leva:
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, fields: list[Field], xml: str | None) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, fields: list[Field], xml: str) -> None:
         self.hass, self.entry, self.fields, self.xml = hass, entry, fields, xml
         self.signal = f"{DOMAIN}_{entry.entry_id}"
         self.frame: Frame | None = None
@@ -63,7 +64,7 @@ class Leva:
 
     @callback
     def _on_xml(self, name: str) -> None:
-        if self.xml and name != self.xml:
+        if name != self.xml:
             _LOG.info("Firmware changed (%s -> %s), reloading", self.xml, name)
             self.hass.config_entries.async_schedule_reload(self.entry.entry_id)
 
@@ -92,6 +93,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         xml = await probe(host, port)
     except (OSError, TimeoutError) as err:
         raise ConfigEntryNotReady(f"ito module {host}:{port} not reachable: {err}") from err
+    if xml is None:
+        raise ConfigEntryNotReady(f"ito module {host}:{port} did not report its firmware (MC?)")
     fields = await hass.async_add_executor_job(load_fields, hass.config.path(DOMAIN), xml)
     entry.runtime_data = leva = Leva(hass, entry, fields, xml)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

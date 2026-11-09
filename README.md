@@ -9,10 +9,11 @@ Status Monitor report (`MCr`, 4 frames/s) and turns it into entities. No MQTT, n
 1. Copy `custom_components/leva` into your HA `config/custom_components/`.
 2. Restart HA, then *Settings → Devices & services → Add integration → leva! (ito)*, enter
    the module's IP. Give the module a fixed DHCP lease.
-3. Optional: copy the Status Monitor XML that came with your firmware (e.g.
-   `leva!-65FCB201.xml`) to `config/leva/`. The integration asks the firmware which XML it
-   uses (`MC?`) and reads field positions, names and units from it. Without it, a built-in
-   table for the leva! 3.x layout is used (logs a warning for unknown firmware).
+3. Copy the Status Monitor XML that came with your firmware (e.g. `leva!-65FCB201.xml`) to
+   `config/leva/`. The integration asks the firmware which XML it uses (`MC?`) and reads
+   field positions, names and units from it. For `leva!-64EA1111` and `leva!-65FCB201` a
+   built-in table is used if the file is missing; any other firmware without its XML is
+   refused (setup error) rather than shown with a guessed layout.
 
 ## Entities
 
