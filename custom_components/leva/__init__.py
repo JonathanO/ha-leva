@@ -33,8 +33,8 @@ def load_fields(xml_dir: str, name: str) -> list[Field]:
         return fields
     if name in BUILTIN_NAMES:
         return BUILTIN
-    raise ConfigEntryError(f"Unknown firmware layout {name}: copy the {name}.xml that came with "
-                           f"your leva! download to {xml_dir}/ and reload the integration")
+    raise ConfigEntryError(f"Unknown firmware layout {name}: upload the {name}.xml that came with "
+                           f"your leva! download via Reconfigure (or copy it to {xml_dir}/)")
 
 
 class Leva:

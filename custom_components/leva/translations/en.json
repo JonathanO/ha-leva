@@ -4,10 +4,30 @@
       "user": {
         "title": "ito module",
         "description": "IP address of the ito module running leva!.",
-        "data": {"host": "Host", "port": "Port"}
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "xml": "Firmware XML (optional)"
+        },
+        "data_description": {
+          "xml": "The leva!-XXXXXXXX.xml from your leva! download. Needed unless your firmware is leva!-64EA1111 or leva!-65FCB201."
+        }
+      },
+      "reconfigure": {
+        "title": "Firmware XML",
+        "description": "Upload the leva!-XXXXXXXX.xml that came with your leva! download (folder \"xml file for status monitor\").",
+        "data": {
+          "xml": "XML file"
+        }
       }
     },
-    "error": {"cannot_connect": "Cannot connect to the ito module."},
-    "abort": {"already_configured": "This module is already configured."}
+    "error": {
+      "cannot_connect": "Cannot connect to the ito module.",
+      "invalid_xml": "Not a valid Status Monitor XML file."
+    },
+    "abort": {
+      "already_configured": "This module is already configured.",
+      "reconfigure_successful": "XML installed."
+    }
   }
 }
