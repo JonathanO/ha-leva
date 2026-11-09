@@ -6,8 +6,7 @@ Status Monitor report (`MCr`, 4 frames/s) and turns it into entities. No MQTT, n
 
 ## Install
 
-1. Copy `custom_components/leva` into your HA `config/custom_components/` (or add this repo
-   to HACS as a custom repository).
+1. Copy `custom_components/leva` into your HA `config/custom_components/`.
 2. Restart HA, then *Settings → Devices & services → Add integration → leva! (ito)*, enter
    the module's IP. Give the module a fixed DHCP lease.
 3. Optional: copy the Status Monitor XML that came with your firmware (e.g.

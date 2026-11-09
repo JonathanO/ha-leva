@@ -70,12 +70,10 @@ class Leva:
     def _track_brew(self, fr: Frame) -> None:
         """Fire an event when the pump / brew program stops. Covers shots and flushes alike;
         filter on weight or duration in the automation."""
-        p = fr.values.get("pressure")
         if fr.brewing:
             if self._brew is None:
-                self._brew = {"start": time.monotonic(), "peak": None}
-            if p is not None and (self._brew["peak"] is None or p > self._brew["peak"]):
-                self._brew["peak"] = p
+                self._brew = {"start": time.monotonic(), "peak": 0.0}
+            self._brew["peak"] = max(self._brew["peak"], fr.values.get("pressure") or 0)
         elif self._brew:
             b, self._brew = self._brew, None
             self.hass.bus.async_fire(EVENT_BREW_FINISHED, {

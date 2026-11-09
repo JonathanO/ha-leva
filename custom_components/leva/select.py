@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from homeassistant.components.select import SelectEntity
-from homeassistant.exceptions import HomeAssistantError
 
 from .entity import LevaEntity
 
@@ -33,7 +32,4 @@ class Profile(LevaEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         slot = next(i for i, k in enumerate(SLOTS, 1) if self.values.get(k) == option)
         # ponytail: assumes frame slot n == the firmware's "PROFILE n" function; check on hardware.
-        try:
-            self.leva.client.send(f"MCcPROFILE {slot}")
-        except ConnectionError as err:
-            raise HomeAssistantError(str(err)) from err
+        self.send(f"MCcPROFILE {slot}")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
 
@@ -23,6 +24,12 @@ class LevaEntity(Entity):
     @property
     def values(self) -> dict:
         return self.leva.frame.values if self.leva.frame else {}
+
+    def send(self, cmd: str) -> None:
+        try:
+            self.leva.client.send(cmd)
+        except ConnectionError as err:
+            raise HomeAssistantError(str(err)) from err
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(async_dispatcher_connect(self.hass, self.leva.signal, self.async_write_ha_state))

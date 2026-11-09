@@ -3,7 +3,6 @@ module ignores them."""
 from __future__ import annotations
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.exceptions import HomeAssistantError
 
 from .entity import LevaEntity
 
@@ -20,7 +19,4 @@ class LevaButton(LevaEntity, ButtonEntity):
         self.cmd = cmd
 
     async def async_press(self) -> None:
-        try:
-            self.leva.client.send(self.cmd)
-        except ConnectionError as err:
-            raise HomeAssistantError(str(err)) from err
+        self.send(self.cmd)
