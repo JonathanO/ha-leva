@@ -1,0 +1,11 @@
+{
+  "domain": "leva",
+  "name": "leva! (ito)",
+  "codeowners": ["@JonathanO"],
+  "config_flow": true,
+  "documentation": "https://github.com/JonathanO/ha-leva",
+  "issue_tracker": "https://github.com/JonathanO/ha-leva/issues",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "0.1.0"
+}

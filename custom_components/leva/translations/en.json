@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "ito module",
+        "description": "IP address of the ito module running leva!.",
+        "data": {"host": "Host", "port": "Port"}
+      }
+    },
+    "error": {"cannot_connect": "Cannot connect to the ito module."},
+    "abort": {"already_configured": "This module is already configured."}
+  }
+}
