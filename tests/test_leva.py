@@ -257,3 +257,14 @@ async def test_diagnostics_include_setup_dump(hass, ito) -> None:
     assert diag["frame"]["values"]["temperature_pid1"] == 90.15
     await wait_for(lambda: ito.received == ["MCu", "MCr"])  # report restarted after the dump
     assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_overlapping_diagnostics_downloads(hass, ito) -> None:
+    from custom_components.leva.diagnostics import async_get_config_entry_diagnostics
+
+    entry = await setup(hass, ito.port)
+    await wait_for(lambda: entry.runtime_data.frame is not None)
+    a, b = await asyncio.gather(async_get_config_entry_diagnostics(hass, entry),
+                                async_get_config_entry_diagnostics(hass, entry))
+    assert a["setup"] == b["setup"] == ["PID 1...", "| Control     PID", "| Setpoint  90.0°"]
+    assert await hass.config_entries.async_unload(entry.entry_id)

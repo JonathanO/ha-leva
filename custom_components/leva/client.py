@@ -64,22 +64,24 @@ class Client:
         self._on_frame, self._on_stale, self._on_xml = on_frame, on_stale, on_xml
         self._writer: asyncio.StreamWriter | None = None
         self._dump: list[str] | None = None  # collects other lines while dump_setup runs
+        self._dump_lock = asyncio.Lock()  # one dump at a time (e.g. repeated diagnostics clicks)
 
     async def dump_setup(self, quiet: float = 1.5, limit: float = 20) -> list[str]:
         """Setup menu as text (`MCu`, read-only, ~1100 lines in ~3 s). Ends when no line has
         arrived for `quiet` seconds. The dump interrupts the report, so `MCr` is re-sent."""
-        self._dump = []
-        try:
-            self.send("MCu")
-            end, seen = time.monotonic() + limit, -1
-            while time.monotonic() < end and (seen != len(self._dump) or not self._dump):
-                seen = len(self._dump)
-                await asyncio.sleep(quiet)
-            return self._dump
-        finally:
-            self._dump = None
-            with contextlib.suppress(ConnectionError):
-                self.send("MCr")
+        async with self._dump_lock:
+            dump = self._dump = []
+            try:
+                self.send("MCu")
+                end, seen = time.monotonic() + limit, -1
+                while time.monotonic() < end and (seen != len(dump) or not dump):
+                    seen = len(dump)
+                    await asyncio.sleep(quiet)
+                return dump
+            finally:
+                self._dump = None
+                with contextlib.suppress(ConnectionError):
+                    self.send("MCr")
 
     def send(self, cmd: str) -> None:
         if self._writer is None:
