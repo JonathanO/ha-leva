@@ -54,10 +54,12 @@ async def probe(host: str, port: int) -> str | None:
 
 
 class Client:
-    def __init__(self, host: str, port: int, fields: list[Field],
+    def __init__(self, host: str, port: int, xml: str, fields: list[Field],
                  on_frame: Callable[[Frame], None], on_stale: Callable[[], None],
                  on_xml: Callable[[str], None]) -> None:
-        self.host, self.port, self.fields = host, port, fields
+        """xml: firmware name `fields` belong to. Frames are only decoded once the module has
+        confirmed that name on the current connection; another name calls on_xml."""
+        self.host, self.port, self.xml, self.fields = host, port, xml, fields
         self._on_frame, self._on_stale, self._on_xml = on_frame, on_stale, on_xml
         self._writer: asyncio.StreamWriter | None = None
 
@@ -84,8 +86,9 @@ class Client:
         now = time.monotonic()
         self.send("MC?")
         self.send("MCr")
-        last_mcr = last_tx = now
+        last_mcr = last_mcq = last_tx = now
         last_frame = last_display = 0.0
+        confirmed = False  # firmware name checked on this connection (may have been reflashed)
         while True:
             raw = await asyncio.wait_for(reader.readline(), WATCHDOG_S)
             if not raw:
@@ -93,13 +96,16 @@ class Client:
             line = raw.decode("latin-1").rstrip("\r\n")
             now = time.monotonic()
             if line.startswith("{"):
-                if frame := parse(line, self.fields):
+                if confirmed and (frame := parse(line, self.fields)):
                     last_frame = now
                     self._on_frame(frame)
             elif line.startswith("<"):
                 last_display = now
             elif line.startswith("XML="):
-                self._on_xml(line[4:].strip())
+                name = line[4:].strip()
+                confirmed = name == self.xml
+                if not confirmed:
+                    self._on_xml(name)
 
             if now - last_frame > STALE_S:
                 self._on_stale()
@@ -109,6 +115,9 @@ class Client:
                 if now - last_mcr > wait:
                     self.send("MCr")
                     last_mcr = last_tx = now
+            if not confirmed and now - last_mcq > RESEND_S:  # MC? right after boot is lost too
+                self.send("MC?")
+                last_mcq = last_tx = now
             if now - last_tx > KEEPALIVE_S:
                 self.send("")
                 last_tx = now

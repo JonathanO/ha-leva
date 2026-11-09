@@ -47,7 +47,7 @@ class Leva:
         self.device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)}, name=entry.title,
             manufacturer="Software & Circuits", model="ito / leva!", sw_version=xml)
-        self.client = Client(entry.data[CONF_HOST], entry.data.get(CONF_PORT, 23), fields,
+        self.client = Client(entry.data[CONF_HOST], entry.data.get(CONF_PORT, 23), xml, fields,
                              self._on_frame, self._on_stale, self._on_xml)
 
     @callback
@@ -64,9 +64,8 @@ class Leva:
 
     @callback
     def _on_xml(self, name: str) -> None:
-        if name != self.xml:
-            _LOG.info("Firmware changed (%s -> %s), reloading", self.xml, name)
-            self.hass.config_entries.async_schedule_reload(self.entry.entry_id)
+        _LOG.info("Firmware changed (%s -> %s), reloading", self.xml, name)
+        self.hass.config_entries.async_schedule_reload(self.entry.entry_id)
 
     def _track_brew(self, fr: Frame) -> None:
         """Fire an event when the pump / brew program stops. Covers shots and flushes alike;
