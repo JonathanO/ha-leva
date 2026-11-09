@@ -13,7 +13,7 @@ from . import DOMAIN
 from .client import probe
 from .protocol import fields_from_xml
 
-XML = FileSelector(FileSelectorConfig(accept=".xml"))
+XML = FileSelector(FileSelectorConfig(accept=".xml,text/xml,application/xml"))
 
 
 def _save_xml(hass, file_id: str) -> None:
