@@ -1,0 +1,56 @@
+# leva! (ito) for Home Assistant
+
+Native Home Assistant integration for espresso machines with an
+[ito](https://www.softwareandcircuits.com/division/circuits/products/ito/index.html) controller
+module running the [leva!](http://projectcaffe.bplaced.net/) firmware. Holds one TCP connection
+to the module (port 23), streams the Status Monitor report (`MCr`, 4 frames/s) and turns it
+into entities.
+
+## Requirements
+
+- ito module with leva! firmware, connected to your network (station mode)
+- The Status Monitor XML that comes with your leva! download
+- Home Assistant 2026.11 or newer (installs through the built-in Marketplace)
+
+## Install
+
+1. *Settings → Marketplace → Add from link*, enter `JonathanO/ha-leva` and select *Add*.
+   Install *leva! (ito)* and restart Home Assistant.
+2. Then *Settings → Devices & services → Add integration → leva! (ito)*. Enter
+   the module's IP (give it a fixed DHCP lease) and upload the Status Monitor XML from your
+   leva! download (`xml file for status monitor/leva!-XXXXXXXX.xml`).
+3. Before a firmware update, upload the new firmware's XML with *Reconfigure* on the
+   integration. When the machine comes back with the new firmware, the integration switches to
+   it automatically. Forgot? *Settings → Repairs* shows an entry for the missing file and takes
+   the upload there. Uploads are kept in `config/leva/` (copying files there works too).
+
+The integration asks the firmware which XML it uses (`MC?`) and reads field positions,
+names and units from that file. Without the matching file setup stops and asks for it.
+
+## Entities
+
+- Sensors: boiler temperature, setpoint, heater output (+ 1 min average), pressure, target
+  pressure, weight, flow rate (scale / flow meter), volume, mode (`on`, `eco`, `standby`, …).
+  PID internals and other fields from the XML exist but start disabled.
+- Binary sensor **Brewing**: pump / brew program running (also flushes, water through the wand).
+- Buttons **Wake**, **Eco**, **Standby**; select **Profile**. These need
+  *Setup → Wifi → Permissions → Serial menu* enabled in leva!, which lets every device on your
+  LAN control pump and heating. Leave it off if you only want readings.
+- Event `leva_brew_finished` when the pump stops: `duration`, `weight`, `volume`,
+  `peak_pressure`, `profile`. Filter shots from flushes by weight or duration.
+- *Download diagnostics* on the device page includes the machine's full setup menu (PID
+  settings, pressure profiles, doses) next to the current readings.
+
+## Notes
+
+- The report mode is global for the module. If the Virtual Display / Companion app switches
+  it to display mode, entities go unavailable and the integration asks for `MCr` again
+  after 2 minutes.
+- Sending commands to your machine is at your own risk.
+
+## Development
+
+```sh
+pip install -r requirements_test.txt   # Python 3.14
+pytest
+```
