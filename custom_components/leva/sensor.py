@@ -20,8 +20,9 @@ NAMES = {
     "flow_rate_g_s": "Flow rate (scale)",
     "flow_rate_ml_s": "Flow rate (flow meter)",
     "volume": "Volume",
+    "selected_profile": "Profile",
 }
-SKIP = {"profile_1", "profile_2", "profile_3", "profile_4", "selected_profile"}  # see select.py
+SKIP = {"profile_1", "profile_2", "profile_3", "profile_4"}  # slot names; the selected one is enough
 MODES = {"PID": "on", "ECO": "eco", "OFF": "off", "CLD": "cold", "ATN": "autotune", None: "standby"}
 
 

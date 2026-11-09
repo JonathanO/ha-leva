@@ -18,7 +18,7 @@ from .protocol import Field, Frame, fields_from_xml
 
 _LOG = logging.getLogger(__name__)
 DOMAIN = "leva"
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SELECT]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
 EVENT_BREW_FINISHED = "leva_brew_finished"
 
 
