@@ -13,9 +13,7 @@ from . import DOMAIN
 from .client import probe
 from .protocol import fields_from_xml
 
-# MIME types next to the extension, like core's file selectors: the HA mobile app's picker
-# would not offer .xml files with the extension alone.
-XML = FileSelector(FileSelectorConfig(accept=".xml,text/xml,application/xml"))
+XML =FileSelector(FileSelectorConfig(accept=".xml,text/xml,application/xml"))
 
 
 def _save_xml(hass, file_id: str) -> None:
