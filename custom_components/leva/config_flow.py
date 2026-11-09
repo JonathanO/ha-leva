@@ -37,8 +37,6 @@ class LevaConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def _upload(self, user_input, errors) -> bool:
-        if "xml" not in user_input:
-            return True
         try:
             await self.hass.async_add_executor_job(_save_xml, self.hass, user_input.pop("xml"))
         except ValueError:
@@ -60,7 +58,7 @@ class LevaConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="user", errors=errors, data_schema=vol.Schema({
             vol.Required(CONF_HOST): str,
             vol.Required(CONF_PORT, default=23): int,
-            vol.Optional("xml"): XML,
+            vol.Required("xml"): XML,
         }))
 
     async def async_step_reconfigure(self, user_input=None):

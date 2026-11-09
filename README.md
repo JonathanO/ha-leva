@@ -14,9 +14,7 @@ Status Monitor report (`MCr`, 4 frames/s) and turns it into entities. No MQTT, n
    are stored in `config/leva/` (copying files there works too).
 
 The integration asks the firmware which XML it uses (`MC?`) and reads field positions,
-names and units from that file. For `leva!-64EA1111` and `leva!-65FCB201` a built-in table
-is used if the file is missing; other firmware without its XML is refused (setup error)
-rather than decoded with a guessed layout.
+names and units from that file. Without the matching file setup stops and asks for it.
 
 ## Entities
 

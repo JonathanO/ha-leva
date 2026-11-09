@@ -7,10 +7,10 @@
         "data": {
           "host": "Host",
           "port": "Port",
-          "xml": "Firmware XML (optional)"
+          "xml": "Firmware XML"
         },
         "data_description": {
-          "xml": "The leva!-XXXXXXXX.xml from your leva! download. Needed unless your firmware is leva!-64EA1111 or leva!-65FCB201."
+          "xml": "The leva!-XXXXXXXX.xml from your leva! download (folder \"xml file for status monitor\")."
         }
       },
       "reconfigure": {

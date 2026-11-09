@@ -13,28 +13,22 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .client import Client, probe
-from .protocol import BUILTIN, Field, Frame, fields_from_xml
+from .protocol import Field, Frame, fields_from_xml
 
 _LOG = logging.getLogger(__name__)
 DOMAIN = "leva"
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON, Platform.SELECT]
-BUILTIN_NAMES = {"leva!-64EA1111", "leva!-65FCB201"}
 EVENT_BREW_FINISHED = "leva_brew_finished"
 
 
 def load_fields(xml_dir: str, name: str) -> list[Field]:
-    """Fields from <config>/leva/<name>.xml if installed, else the built-in table for known
-    firmware. Unknown firmware without its XML is refused: a guessed layout gives wrong values."""
+    """Fields from <config>/leva/<name>.xml, the Status Monitor XML the firmware names."""
     path = os.path.join(xml_dir, f"{name}.xml")
-    if os.path.isfile(path):
-        with open(path, encoding="latin-1") as f:
-            fields = fields_from_xml(f.read())
-        _LOG.info("Using %s (%d fields)", path, len(fields))
-        return fields
-    if name in BUILTIN_NAMES:
-        return BUILTIN
-    raise ConfigEntryError(f"Unknown firmware layout {name}: upload the {name}.xml that came with "
-                           f"your leva! download via Reconfigure (or copy it to {xml_dir}/)")
+    if not os.path.isfile(path):
+        raise ConfigEntryError(f"Firmware {name}: upload the {name}.xml that came with your leva! "
+                               f"download via Reconfigure (or copy it to {xml_dir}/)")
+    with open(path, encoding="latin-1") as f:
+        return fields_from_xml(f.read())
 
 
 class Leva:

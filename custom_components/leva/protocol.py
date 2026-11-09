@@ -38,62 +38,6 @@ def _fields(rows) -> list[Field]:
     return out
 
 
-# Layout reported as XML=leva!-64EA1111 / leva!-65FCB201 (leva! 3.x, 289-char frame).
-# Used when no XML file is installed. Names match the XML's export names so entity ids
-# stay the same whether the table or the XML is used.
-BUILTIN_LEN = 289
-BUILTIN = _fields([
-    ("Temperature PID1", 7, 6, "float", "°C", None),
-    ("Setpoint PID", 13, 5, "float", "°C", None),
-    ("Heat PID", 18, 3, "int", "%", None),
-    ("Heat PID (P)", 21, 6, "float", "%", None),
-    ("Heat PID (I)", 27, 6, "float", "%", None),
-    ("Heat PID (D)", 33, 6, "float", "%", None),
-    ("Heat PID (feed forward)", 39, 6, "float", "%", None),
-    ("dT/dt PID1", 45, 8, "float", None, None),
-    ("Kc PID", 53, 5, "float", "%/°", None),
-    ("Ti PID", 58, 5, "float", "s", None),
-    ("Td PID", 63, 5, "float", "s", None),
-    ("Windup guard PID1", 68, 5, "float", "%", None),
-    ("Heat PID (average)", 73, 5, "float", "%", None),
-    ("Temperature PID2", 81, 5, "float", "°C", None),
-    ("Setpoint PID2", 87, 5, "float", "°C", None),
-    ("Heat PID2", 92, 3, "int", "%", None),
-    ("Heat PID2 (P term)", 95, 6, "float", "%", None),
-    ("Heat PID2 (I term)", 101, 6, "float", "%", None),
-    ("Heat PID2 (D term)", 107, 6, "float", "%", None),
-    ("Heat PID2 (feed forward)", 113, 6, "float", "%", None),
-    ("dT/dt PID2", 119, 7, "float", None, None),
-    ("Kc PID2", 127, 5, "float", "%/°", None),
-    ("Ti PID2", 132, 5, "float", "s", None),
-    ("Td PID2", 137, 5, "float", "s", None),
-    ("Windup guard PID2", 142, 5, "float", "%", None),
-    ("Heat PID2 (average)", 147, 5, "float", "%", None),
-    ("Volume", 152, 3, "int", "ml", None),
-    ("Flow rate", 160, 3, "int", "ml/s", 0.0166),
-    ("PCB sensor", 168, 5, "float", "°C", None),
-    ("Temperature Aux1", 174, 5, "float", "°C", None),
-    ("Temperature Aux2", 180, 5, "float", "°C", None),
-    ("Temperature Aux3", 186, 5, "float", "°C", None),
-    ("Pressure", 197, 5, "float", "bar", None),
-    ("Pressure SP", 192, 5, "float", "bar", None),
-    ("Pressure band (min)", 202, 5, "float", "bar", None),
-    ("Pressure band (max)", 207, 5, "float", "bar", None),
-    ("Phase", 212, 3, "int", "°", None),
-    ("Phase (Bias)", 215, 3, "int", "°", None),
-    ("Phase (P)", 218, 4, "int", "°", None),
-    ("Phase (I)", 222, 4, "int", "°", None),
-    ("Weight", 226, 5, "float", "g", None),
-    ("Flow rate", 231, 5, "float", "g/s", None),
-    ("Profile 1", 236, 9, "string", None, None),
-    ("Profile 2", 245, 9, "string", None, None),
-    ("Profile 3", 254, 9, "string", None, None),
-    ("Profile 4", 263, 9, "string", None, None),
-    ("Selected profile", 272, 9, "string", None, None),
-    ("Flow tracking", 281, 3, "int", "ml/s", 0.01666),
-])
-
-
 def fields_from_xml(text: str) -> list[Field]:
     """Fields from a Status Monitor XML. Only <value> elements with an export name are used."""
     root = ET.fromstring(re.sub(r"^<\?xml[^>]*\?>", "", text.lstrip()))
@@ -156,43 +100,43 @@ def parse(line: str, fields: list[Field]) -> Frame | None:
 
 
 if __name__ == "__main__":
-    import sys
+    # Hand-made test layout (not a vendor file): fixed-width fields in a 289-char frame.
+    xml = """<?xml version="1.0"?><cfg><values>
+        <value at="4" len="3" type="string">1:%</value>
+        <value at="7" len="6" export="Temperature PID1" type="float" unit="&#xb0;C"/>
+        <value at="18" len="3" export="Heat PID" type="int" unit="%"/>
+        <value at="160" len="3" export="Flow rate" factor="0.0166" type="int" unit="ml/s"/>
+        <value at="168" len="5" export="PCB sensor" type="float" unit="&#xb0;C"/>
+        <value at="197" len="5" export="Pressure" type="float" unit="bar"/>
+        <value at="226" len="5" export="Weight" type="float" unit="g"/>
+        <value at="231" len="5" export="Flow rate" type="float" unit="g/s"/>
+        <value at="236" len="9" export="Profile 1" type="string"/>
+        <value at="254" len="9" export="Profile 3" type="string"/>
+        </values></cfg>"""
+    fields = fields_from_xml(xml)
+    assert [f.key for f in fields] == ["temperature_pid1", "heat_pid", "flow_rate_ml_s", "pcb_sensor", "pressure",
+                                       "weight", "flow_rate_g_s", "profile_1", "profile_3"]
+    assert fields[0].unit == "°C" and fields[2].factor == 0.0166
 
-    def build(vals: dict[int, str], flag="-", mode="PID") -> str:
-        body = list("{ " + flag + "1" + mode + "?" * (BUILTIN_LEN - 12))
+    def build(vals: dict[int, str], flag="-", mode="PID", length=289) -> str:
+        body = list("{ " + flag + "1" + mode + "?" * (length - 12))
         for at, s in vals.items():
             body[at:at + len(s)] = s
-        s = "".join(body) + "~ "
+        s = "".join(body[:length - 5]) + "~ "
         return s + f"{-sum(s[:-2].encode('latin-1')) & 0xFF:02X}}}"
 
-    line = build({7: "090.15", 13: "090.0", 18: "017", 160: "500", 197: "08.22",
-                  226: "042.1", 231: "03.12", 236: "     9BAR", 245: "GEN.LEVER",
-                  254: " " * 9, 272: "GEN.LEVER"}, flag="*")
-    assert len(line) == BUILTIN_LEN, len(line)
-    fr = parse(line, BUILTIN)
+    vals = {7: "090.15", 18: "017", 160: "500", 197: "08.22", 226: "042.1", 231: "03.12",
+            236: "     9BAR", 254: " " * 9}
+    line = build(vals, flag="*")
+    fr = parse(line, fields)
     assert fr and fr.brewing and fr.mode == "PID"
     v = fr.values
     assert v["temperature_pid1"] == 90.15 and v["heat_pid"] == 17 and v["pressure"] == 8.22
     assert v["flow_rate_ml_s"] == 8.3 and v["flow_rate_g_s"] == 3.12 and v["weight"] == 42.1
-    assert v["profile_1"] == "9BAR" and v["profile_3"] is None and v["selected_profile"] == "GEN.LEVER"
-    assert v["pcb_sensor"] is None
-    assert parse(line[:100] + "X" + line[101:], BUILTIN) is None  # bad checksum
-    short = line[:200] + "~ "
-    short += f"{-sum(short[:-2].encode('latin-1')) & 0xFF:02X}}}"
-    sv = parse(short, BUILTIN).values
+    assert v["profile_1"] == "9BAR" and v["profile_3"] is None and v["pcb_sensor"] is None
+    assert parse(line[:100] + "X" + line[101:], fields) is None  # bad checksum
+    sv = parse(build(vals, length=200), fields).values  # shorter frame than the layout
     assert sv["temperature_pid1"] == 90.15 and sv["pressure"] is None and sv["weight"] is None
-    standby = parse(build({}, mode="???"), BUILTIN)
+    standby = parse(build({}, mode="???"), fields)
     assert standby and standby.mode is None and not standby.brewing
-    xml = ('<?xml version="1.0"?><cfg><values><value at="4" len="3" type="string">1:%</value>'
-           '<value at="7" len="6" export="Temperature PID1" type="float" unit="&#xb0;C"/>'
-           '<value at="160" len="3" export="Flow rate" factor="0.0166" type="int" unit="ml/s"/>'
-           '<value at="231" len="5" export="Flow rate" type="float" unit="g/s"/></values></cfg>')
-    fx = fields_from_xml(xml)
-    assert [f.key for f in fx] == ["temperature_pid1", "flow_rate_ml_s", "flow_rate_g_s"]
-    assert fx[0].unit == "°C" and fx[1].factor == 0.0166
-    # Optional: compare the builtin table against a real XML file passed as argument.
-    if len(sys.argv) > 1:
-        real = fields_from_xml(open(sys.argv[1], encoding="latin-1").read())
-        assert real == BUILTIN, set(real) ^ set(BUILTIN)
-        print("builtin table matches", sys.argv[1])
     print("ok")
