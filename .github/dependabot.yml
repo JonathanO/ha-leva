@@ -1,0 +1,12 @@
+# Opens a PR when a new pytest-homeassistant (= new Home Assistant release) is out, so CI
+# tests the integration against it.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

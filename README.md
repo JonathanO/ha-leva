@@ -1,8 +1,10 @@
 # leva! (ito) for Home Assistant
 
-Native Home Assistant integration for espresso machines with the Software & Circuits **ito**
-module running **leva!**. Holds one TCP connection to the module (port 23), streams the
-Status Monitor report (`MCr`, 4 frames/s) and turns it into entities.
+Native Home Assistant integration for espresso machines with an
+[ito](https://www.softwareandcircuits.com/division/circuits/products/ito/index.html) controller
+module running the [leva!](http://projectcaffe.bplaced.net/) firmware. Holds one TCP connection
+to the module (port 23), streams the Status Monitor report (`MCr`, 4 frames/s) and turns it
+into entities.
 
 ## Requirements
 
@@ -41,10 +43,11 @@ names and units from that file. Without the matching file setup stops and asks f
 - The report mode is global for the module. If the Virtual Display / Companion app switches
   it to display mode, entities go unavailable and the integration asks for `MCr` again
   after 2 minutes.
-- Unverified on hardware: whether `MCr` works with the Serial menu permission off (the leva!
-  manual says report commands are always allowed), and that profile slot *n* matches
-  `MCcPROFILE n`.
-- Connection quirks (lost `MCr` after boot, silent sockets after power cuts, 4-connection
-  limit) were learned from [leva2mqtt](https://github.com/stangster-360/leva2mqtt)'s captures.
+- Sending commands to your machine is at your own risk.
 
-Not affiliated with Software & Circuits. Sending commands to your machine is at your own risk.
+## Development
+
+```sh
+pip install -r requirements_test.txt   # Python 3.14
+pytest
+```

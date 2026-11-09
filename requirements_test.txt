@@ -1,0 +1,2 @@
+# Pins homeassistant to the same version; bump both together (Dependabot does this).
+pytest-homeassistant==2026.11.0
