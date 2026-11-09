@@ -1,6 +1,9 @@
 {
   "domain": "leva",
   "name": "leva! (ito)",
+  "categories": [
+    "appliances_cleaning.cooking"
+  ],
   "codeowners": [
     "@JonathanO"
   ],
