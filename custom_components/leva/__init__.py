@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -21,12 +22,10 @@ PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON, Platform.
 EVENT_BREW_FINISHED = "leva_brew_finished"
 
 
-def load_fields(xml_dir: str, name: str) -> list[Field]:
-    """Fields from <config>/leva/<name>.xml, the Status Monitor XML the firmware names."""
-    path = os.path.join(xml_dir, f"{name}.xml")
+def load_fields(path: str) -> list[Field] | None:
+    """Fields from the Status Monitor XML the firmware names, None if it isn't installed."""
     if not os.path.isfile(path):
-        raise ConfigEntryError(f"Firmware {name}: upload the {name}.xml that came with your leva! "
-                               f"download via Reconfigure (or copy it to {xml_dir}/)")
+        return None
     with open(path, encoding="latin-1") as f:
         return fields_from_xml(f.read())
 
@@ -88,7 +87,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(f"ito module {host}:{port} not reachable: {err}") from err
     if xml is None:
         raise ConfigEntryNotReady(f"ito module {host}:{port} did not report its firmware (MC?)")
-    fields = await hass.async_add_executor_job(load_fields, hass.config.path(DOMAIN), xml)
+    path = hass.config.path(DOMAIN, f"{xml}.xml")
+    if (fields := await hass.async_add_executor_job(load_fields, path)) is None:
+        # Settings > Repairs entry whose fix flow takes the upload (repairs.py).
+        ir.async_create_issue(hass, DOMAIN, entry.entry_id, is_fixable=True, severity=ir.IssueSeverity.ERROR,
+                              translation_key="missing_xml", translation_placeholders={"name": xml},
+                              data={"entry_id": entry.entry_id, "name": xml})
+        raise ConfigEntryError(f"Firmware {xml}: upload the {xml}.xml that came with your leva! download "
+                               f"via Settings > Repairs or Reconfigure (or copy it to {path})")
+    ir.async_delete_issue(hass, DOMAIN, entry.entry_id)
     entry.runtime_data = leva = Leva(hass, entry, fields, xml)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_create_background_task(hass, leva.client.run(), f"{DOMAIN} {host}")
@@ -97,3 +104,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    ir.async_delete_issue(hass, DOMAIN, entry.entry_id)

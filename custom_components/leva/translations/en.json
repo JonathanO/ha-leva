@@ -29,5 +29,24 @@
       "already_configured": "This module is already configured.",
       "reconfigure_successful": "XML installed."
     }
+  },
+  "issues": {
+    "missing_xml": {
+      "title": "leva!: firmware {name} needs its XML file",
+      "fix_flow": {
+        "step": {
+          "upload": {
+            "title": "Upload firmware XML",
+            "description": "The machine now runs firmware {name}. Upload the {name}.xml that came with your leva! download (folder \"xml file for status monitor\"). Until then the machine's entities are unavailable.",
+            "data": {
+              "xml": "XML file"
+            }
+          }
+        },
+        "error": {
+          "invalid_xml": "Not a valid Status Monitor XML file."
+        }
+      }
+    }
   }
 }

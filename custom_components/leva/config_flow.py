@@ -33,16 +33,18 @@ def _save_xml(hass, file_id: str) -> None:
         f.write(text)
 
 
+async def upload(hass, user_input: dict, errors: dict) -> bool:
+    """Save user_input["xml"] (and remove it from user_input); on failure set the form error."""
+    try:
+        await hass.async_add_executor_job(_save_xml, hass, user_input.pop("xml"))
+    except ValueError:
+        errors["xml"] = "invalid_xml"
+        return False
+    return True
+
+
 class LevaConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
-
-    async def _upload(self, user_input, errors) -> bool:
-        try:
-            await self.hass.async_add_executor_job(_save_xml, self.hass, user_input.pop("xml"))
-        except ValueError:
-            errors["xml"] = "invalid_xml"
-            return False
-        return True
 
     async def async_step_user(self, user_input=None):
         errors = {}
@@ -53,7 +55,7 @@ class LevaConfigFlow(ConfigFlow, domain=DOMAIN):
             except (OSError, TimeoutError):
                 errors["base"] = "cannot_connect"
             else:
-                if await self._upload(user_input, errors):
+                if await upload(self.hass, user_input, errors):
                     return self.async_create_entry(title="Espresso machine", data=user_input)
         return self.async_show_form(step_id="user", errors=errors, data_schema=vol.Schema({
             vol.Required(CONF_HOST): str,
@@ -64,7 +66,7 @@ class LevaConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input=None):
         """Upload the XML for new firmware."""
         errors = {}
-        if user_input is not None and await self._upload(user_input, errors):
+        if user_input is not None and await upload(self.hass, user_input, errors):
             return self.async_update_reload_and_abort(self._get_reconfigure_entry())
         return self.async_show_form(step_id="reconfigure", errors=errors,
                                     data_schema=vol.Schema({vol.Required("xml"): XML}))
