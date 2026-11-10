@@ -141,6 +141,7 @@ async def test_end_to_end(hass, ito, tmp_path) -> None:
         r = await hass.config_entries.flow.async_configure(
             r["flow_id"], {CONF_HOST: "127.0.0.1", CONF_PORT: ito.port, "xml": upload_id(1)})
     assert r["type"] is FlowResultType.CREATE_ENTRY and "xml" not in r["data"], r
+    assert r["data"]["firmware"] == FIRMWARE
     await hass.async_block_till_done()
     entry = hass.config_entries.async_entries("leva")[0]
     assert entry.state is config_entries.ConfigEntryState.LOADED
@@ -170,7 +171,34 @@ async def test_end_to_end(hass, ito, tmp_path) -> None:
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
+async def test_machine_off_at_setup(hass, monkeypatch) -> None:
+    """With the firmware name remembered, setup succeeds while the machine is off and data
+    appears as soon as it is switched on, without waiting for Home Assistant's retries."""
+    monkeypatch.setattr(client, "RETRY_S", 0.1)
+    fake = FakeIto()
+    server = await asyncio.start_server(fake.handle, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    server.close()
+    await server.wait_closed()  # machine off
+    entry = MockConfigEntry(domain="leva", data={CONF_HOST: "127.0.0.1", CONF_PORT: port, "firmware": FIRMWARE})
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is config_entries.ConfigEntryState.LOADED
+    assert hass.states.get("sensor.mock_title_boiler_temperature").state == "unavailable"
+
+    server = await asyncio.start_server(fake.handle, "127.0.0.1", port)  # switched on
+    try:
+        await wait_for(lambda: hass.states.get("sensor.mock_title_boiler_temperature").state == "90.15")
+    finally:
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        server.close()
+        for t in fake.tasks:
+            t.cancel()
+
+
 async def test_unreachable_module_retries(hass) -> None:
+    """A new entry whose firmware was never seen still needs the machine once."""
     entry = await setup(hass, 1)
     assert entry.state is config_entries.ConfigEntryState.SETUP_RETRY
 
@@ -237,6 +265,7 @@ async def test_reflash_switches_to_new_xml(hass, ito, xml_dir, monkeypatch) -> N
     await wait_for(lambda: entry.state is config_entries.ConfigEntryState.LOADED
                    and entry.runtime_data.xml == "leva!-NEW", timeout=5)
     assert [f.key for f in entry.runtime_data.fields] == ["temperature_pid1"]
+    assert entry.data["firmware"] == "leva!-NEW"  # remembered for setups while the machine is off
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 

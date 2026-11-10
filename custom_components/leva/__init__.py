@@ -18,6 +18,7 @@ from .protocol import Field, Frame, fields_from_xml
 
 _LOG = logging.getLogger(__name__)
 DOMAIN = "leva"
+CONF_FIRMWARE = "firmware"  # XML name the firmware reported last (entry data)
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
 EVENT_BREW_FINISHED = "leva_brew_finished"
 
@@ -58,6 +59,7 @@ class Leva:
     @callback
     def _on_xml(self, name: str) -> None:
         _LOG.info("Firmware changed (%s -> %s), reloading", self.xml, name)
+        self.hass.config_entries.async_update_entry(self.entry, data={**self.entry.data, CONF_FIRMWARE: name})
         self.hass.config_entries.async_schedule_reload(self.entry.entry_id)
 
     def _track_brew(self, fr: Frame) -> None:
@@ -81,12 +83,16 @@ class Leva:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     host, port = entry.data[CONF_HOST], entry.data.get(CONF_PORT, 23)
-    try:
-        xml = await probe(host, port)
-    except (OSError, TimeoutError) as err:
-        raise ConfigEntryNotReady(f"ito module {host}:{port} not reachable: {err}") from err
-    if xml is None:
-        raise ConfigEntryNotReady(f"ito module {host}:{port} did not report its firmware (MC?)")
+    # The machine is often switched off: set up from the remembered firmware name and let
+    # the client connect whenever it appears (it re-checks the name on every connection).
+    if (xml := entry.data.get(CONF_FIRMWARE)) is None:  # not seen yet: ask the machine once
+        try:
+            xml = await probe(host, port)
+        except (OSError, TimeoutError) as err:
+            raise ConfigEntryNotReady(f"ito module {host}:{port} not reachable: {err}") from err
+        if xml is None:
+            raise ConfigEntryNotReady(f"ito module {host}:{port} did not report its firmware (MC?)")
+        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_FIRMWARE: xml})
     path = hass.config.path(DOMAIN, f"{xml}.xml")
     if (fields := await hass.async_add_executor_job(load_fields, path)) is None:
         # Settings > Repairs entry whose fix flow takes the upload (repairs.py).

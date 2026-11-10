@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.helpers.selector import FileSelector, FileSelectorConfig
 
-from . import DOMAIN
+from . import CONF_FIRMWARE, DOMAIN
 from .client import probe
 from .protocol import fields_from_xml
 
@@ -51,11 +51,13 @@ class LevaConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._async_abort_entries_match({CONF_HOST: user_input[CONF_HOST]})
             try:
-                await probe(user_input[CONF_HOST], user_input[CONF_PORT])
+                firmware = await probe(user_input[CONF_HOST], user_input[CONF_PORT])
             except (OSError, TimeoutError):
                 errors["base"] = "cannot_connect"
             else:
                 if await upload(self.hass, user_input, errors):
+                    if firmware:  # lets setup work later while the machine is switched off
+                        user_input[CONF_FIRMWARE] = firmware
                     return self.async_create_entry(title="Espresso machine", data=user_input)
         return self.async_show_form(step_id="user", errors=errors, data_schema=vol.Schema({
             vol.Required(CONF_HOST): str,
