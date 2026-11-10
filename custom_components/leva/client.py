@@ -26,6 +26,7 @@ RESEND_S = 5        # re-send MCr this often while no frames arrive
 FOREIGN_S = 120     # ...but this rarely while display frames show another client wants them
 KEEPALIVE_S = 60
 RETRY_S = 5
+DUMP_QUIET_S = 3    # setup dump is over after this long without a line (Wi-Fi stalls ~1 s seen)
 
 
 async def _open(host: str, port: int):
@@ -66,9 +67,10 @@ class Client:
         self._dump: list[str] | None = None  # collects other lines while dump_setup runs
         self._dump_lock = asyncio.Lock()  # one dump at a time (e.g. repeated diagnostics clicks)
 
-    async def dump_setup(self, quiet: float = 1.5, limit: float = 20) -> list[str]:
-        """Setup menu as text (`MCu`, read-only, ~1100 lines in ~3 s). Ends when no line has
-        arrived for `quiet` seconds. The dump interrupts the report, so `MCr` is re-sent."""
+    async def dump_setup(self, limit: float = 30) -> list[str]:
+        """Setup menu as text (`MCu`, read-only, ~1700 lines). Ends when no line has arrived
+        for DUMP_QUIET_S. The dump interrupts the report, so `MCr` is re-sent."""
+        quiet = DUMP_QUIET_S
         async with self._dump_lock:
             dump = self._dump = []
             try:
