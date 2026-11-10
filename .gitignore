@@ -1,3 +1,6 @@
 donotcommit/
 __pycache__/
 .claude/
+.venv/
+.ruff_cache/
+.pytest_cache/
