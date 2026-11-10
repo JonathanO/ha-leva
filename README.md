@@ -30,10 +30,11 @@ names and units from that file. Without the matching file setup stops and asks f
 ## Entities
 
 - Sensors: boiler temperature, setpoint, heater output (+ 1 min average), pressure, target
-  pressure, weight, flow rate (scale / flow meter), volume, mode (`on`, `eco`, `standby`, …).
-  PID internals and other fields from the XML exist but start disabled.
+  pressure, weight, flow rate (scale / flow meter), volume, selected pressure profile, mode
+  (`on`, `eco`, `standby`, …). PID internals and other fields from the XML exist but start
+  disabled.
 - Binary sensor **Brewing**: pump / brew program running (also flushes, water through the wand).
-- Buttons **Wake**, **Eco**, **Standby**; select **Profile**. These need
+- Buttons **Wake**, **Eco**, **Standby**. These need
   *Setup → Wifi → Permissions → Serial menu* enabled in leva!, which lets every device on your
   LAN control pump and heating. Leave it off if you only want readings.
 - Event `leva_brew_finished` when the pump stops: `duration`, `weight`, `volume`,

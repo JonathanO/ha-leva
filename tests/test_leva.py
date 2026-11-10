@@ -151,8 +151,7 @@ async def test_end_to_end(hass, ito, tmp_path) -> None:
     assert hass.states.get("sensor.espresso_machine_mode").state == "on"
     assert hass.states.get("binary_sensor.espresso_machine_brewing").state == "off"
     assert hass.states.get("sensor.espresso_machine_kc_pid") is None  # disabled by default
-    sel = hass.states.get("select.espresso_machine_profile")
-    assert sel.attributes["options"] == ["9BAR", "GEN.LEVER"] and sel.state == "GEN.LEVER"
+    assert hass.states.get("sensor.espresso_machine_profile").state == "GEN.LEVER"
 
     events = []
     hass.bus.async_listen("leva_brew_finished", lambda e: events.append(e.data))
@@ -163,11 +162,7 @@ async def test_end_to_end(hass, ito, tmp_path) -> None:
     assert events[0]["weight"] == 42.1 and events[0]["peak_pressure"] == 8.22, events
 
     await hass.services.async_call("button", "press", {"entity_id": "button.espresso_machine_wake"}, blocking=True)
-    await hass.services.async_call("select", "select_option",
-                                   {"entity_id": "select.espresso_machine_profile", "option": "GEN.LEVER"},
-                                   blocking=True)
-    await wait_for(lambda: "MCcPROFILE 2" in ito.received)
-    assert "MCa" in ito.received
+    await wait_for(lambda: "MCa" in ito.received)
 
     # Power cut: the module goes silent without closing the socket.
     ito.streaming = False
