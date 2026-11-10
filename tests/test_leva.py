@@ -54,6 +54,7 @@ class FakeIto:
 
     def __init__(self) -> None:
         self.xml, self.flag, self.streaming = FIRMWARE, "-", False
+        self.dump_delay = 0.01  # seconds between setup dump lines
         self.received: list[str] = []
         self.writers: list[asyncio.StreamWriter] = []
         self.tasks: list[asyncio.Task] = []
@@ -79,7 +80,7 @@ class FakeIto:
                     self.streaming = False
                     for dump_line in SETUP_DUMP:
                         writer.write(dump_line.encode("latin-1") + b"\r\n")
-                        await asyncio.sleep(0.01)
+                        await asyncio.sleep(self.dump_delay)
         writer.close()
 
     def reboot(self) -> None:
@@ -291,4 +292,24 @@ async def test_overlapping_diagnostics_downloads(hass, ito) -> None:
     a, b = await asyncio.gather(async_get_config_entry_diagnostics(hass, entry),
                                 async_get_config_entry_diagnostics(hass, entry))
     assert a["setup"] == b["setup"] == ["PID 1...", "| Control     PID", "| Setpoint  90.0°"]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_quiet_during_slow_dump(hass, ito) -> None:
+    """A dump longer than the stale timeout: no command is sent into it, entities stay available."""
+    from custom_components.leva.diagnostics import async_get_config_entry_diagnostics
+
+    entry = await setup(hass, ito.port)
+    await wait_for(lambda: entry.runtime_data.frame is not None)
+    states = []
+    hass.bus.async_listen("state_changed", lambda e: states.append(e.data["new_state"].state)
+                          if e.data["entity_id"] == "sensor.mock_title_boiler_temperature" else None)
+    ito.dump_delay = 1.0  # 5 lines, ~5 s
+    ito.received.clear()
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["setup"] == ["PID 1...", "| Control     PID", "| Setpoint  90.0°"]
+    await wait_for(lambda: "MCr" in ito.received)
+    await asyncio.sleep(0.5)
+    assert ito.received == ["MCu", "MCr"], ito.received  # nothing sent mid-dump
+    assert "unavailable" not in states
     assert await hass.config_entries.async_unload(entry.entry_id)
