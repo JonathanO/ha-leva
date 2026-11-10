@@ -25,7 +25,7 @@ STALE_S = 3         # no frame for this long -> data unavailable
 RESEND_S = 5        # re-send MCr this often while no frames arrive
 FOREIGN_S = 120     # ...but this rarely while display frames show another client wants them
 KEEPALIVE_S = 60
-RETRY_S = 10
+RETRY_S = 5
 
 
 async def _open(host: str, port: int):
