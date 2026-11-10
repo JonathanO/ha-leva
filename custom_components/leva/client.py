@@ -129,6 +129,10 @@ class Client:
             elif self._dump is not None and not line.startswith("$id"):
                 self._dump.append(line)
 
+            if self._dump is not None:
+                # A setup dump pauses the report: send nothing until it ends (any command
+                # interleaves with the dump on the shared serial line), and don't call it stale.
+                last_frame = last_tx = last_mcq = now
             if now - last_frame > STALE_S:
                 self._on_stale()
                 # Display frames = someone (Virtual Display / Companion app) switched the
