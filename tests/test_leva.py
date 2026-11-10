@@ -55,6 +55,7 @@ class FakeIto:
     def __init__(self) -> None:
         self.xml, self.flag, self.streaming = FIRMWARE, "-", False
         self.dump_delay = 0.01  # seconds between setup dump lines
+        self.dumps: list[list[str]] = []  # per-MCu dump contents (lossy variants); default SETUP_DUMP
         self.received: list[str] = []
         self.writers: list[asyncio.StreamWriter] = []
         self.tasks: list[asyncio.Task] = []
@@ -78,7 +79,7 @@ class FakeIto:
                     self.streaming = True
                 elif cmd == "MCu":  # setup dump interrupts the report
                     self.streaming = False
-                    for dump_line in SETUP_DUMP:
+                    for dump_line in self.dumps.pop(0) if self.dumps else SETUP_DUMP:
                         writer.write(dump_line.encode("latin-1") + b"\r\n")
                         await asyncio.sleep(self.dump_delay)
         writer.close()
@@ -98,6 +99,11 @@ async def ito():
     server.close()
     for t in fake.tasks:
         t.cancel()
+
+
+@pytest.fixture(autouse=True)
+def fast_dump_end(monkeypatch):
+    monkeypatch.setattr(client, "DUMP_QUIET_S", 0.3)
 
 
 @pytest.fixture(autouse=True)
@@ -280,7 +286,8 @@ async def test_diagnostics_include_setup_dump(hass, ito) -> None:
     assert diag["setup"] == ["PID 1...", "| Control     PID", "| Setpoint  90.0°"]  # no heartbeat/display
     assert diag["entry"][CONF_HOST] == "**REDACTED**" and diag["firmware"] == FIRMWARE
     assert diag["frame"]["values"]["temperature_pid1"] == 90.15
-    await wait_for(lambda: ito.received == ["MCu", "MCr"])  # report restarted after the dump
+    assert diag["setup_complete"] is True and diag["setup_tries"] == 2  # two identical dumps
+    await wait_for(lambda: ito.received == ["MCu", "MCr", "MCu", "MCr"])  # report restarted after each
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
@@ -295,7 +302,7 @@ async def test_overlapping_diagnostics_downloads(hass, ito) -> None:
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_quiet_during_slow_dump(hass, ito) -> None:
+async def test_quiet_during_slow_dump(hass, ito, monkeypatch) -> None:
     """A dump longer than the stale timeout: no command is sent into it, entities stay available."""
     from custom_components.leva.diagnostics import async_get_config_entry_diagnostics
 
@@ -304,12 +311,32 @@ async def test_quiet_during_slow_dump(hass, ito) -> None:
     states = []
     hass.bus.async_listen("state_changed", lambda e: states.append(e.data["new_state"].state)
                           if e.data["entity_id"] == "sensor.mock_title_boiler_temperature" else None)
+    monkeypatch.setattr(client, "DUMP_QUIET_S", 1.5)
     ito.dump_delay = 1.0  # 5 lines, ~5 s
     ito.received.clear()
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["setup"] == ["PID 1...", "| Control     PID", "| Setpoint  90.0°"]
-    await wait_for(lambda: "MCr" in ito.received)
+    await wait_for(lambda: ito.received.count("MCr") == 2)
     await asyncio.sleep(0.5)
-    assert ito.received == ["MCu", "MCr"], ito.received  # nothing sent mid-dump
+    assert ito.received == ["MCu", "MCr", "MCu", "MCr"], ito.received  # nothing sent mid-dump
     assert "unavailable" not in states
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+FULL = ["PID 1...", "| Control     PID", "| Setpoint  90.0°", "| Kc       8.0%/°"]
+
+
+async def test_lossy_dumps(hass, ito) -> None:
+    """The module drops blocks of a dump when Wi-Fi stalls: repeat until two dumps agree."""
+    from custom_components.leva.diagnostics import async_get_config_entry_diagnostics
+
+    entry = await setup(hass, ito.port)
+    await wait_for(lambda: entry.runtime_data.frame is not None)
+    ito.dumps = [FULL[:1] + FULL[3:], FULL, FULL]  # first one lost a block
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert (diag["setup"], diag["setup_complete"], diag["setup_tries"]) == (FULL, True, 3)
+
+    ito.dumps = [FULL[:2], FULL[1:], FULL[:3]]  # never two alike: longest, flagged
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert (diag["setup"], diag["setup_complete"], diag["setup_tries"]) == (FULL[1:], False, 3)
     assert await hass.config_entries.async_unload(entry.entry_id)

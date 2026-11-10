@@ -40,7 +40,9 @@ names and units from that file. Without the matching file setup stops and asks f
 - Event `leva_brew_finished` when the pump stops: `duration`, `weight`, `volume`,
   `peak_pressure`, `profile`. Filter shots from flushes by weight or duration.
 - *Download diagnostics* on the device page includes the machine's full setup menu (PID
-  settings, pressure profiles, doses) next to the current readings.
+  settings, pressure profiles, doses) next to the current readings. The module's Wi-Fi
+  bridge drops parts of the dump when the link stalls, so it is read up to three times
+  until two copies agree (`setup_complete`); readings pause for a few seconds per read.
 
 ## Notes
 
