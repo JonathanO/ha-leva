@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from collections.abc import Callable
+from dataclasses import dataclass
 
+from homeassistant.components.sensor import RestoreSensor, SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.core import callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+from . import Shot
 from .entity import LevaDisplayEntity, LevaEntity
 from .protocol import Field
 
@@ -26,10 +32,38 @@ SKIP = {"profile_1", "profile_2", "profile_3", "profile_4"}  # slot names; the s
 MODES = {"PID": "on", "ECO": "eco", "OFF": "off", "CLD": "cold", "ATN": "autotune", None: "standby"}
 
 
+
+
+@dataclass(frozen=True)
+class ShotValue:
+    key: str
+    name: str
+    value: Callable[[Shot], object]
+    unit: str | None = None
+    device_class: SensorDeviceClass | None = None
+    field: str | None = None  # only when the XML has this field
+
+
+SHOT_VALUES = (
+    ShotValue("last_shot", "Last shot", lambda s: s.end, device_class=SensorDeviceClass.TIMESTAMP),
+    ShotValue("last_shot_duration", "Last shot duration", lambda s: s.duration, "s", SensorDeviceClass.DURATION),
+    ShotValue("last_shot_volume", "Last shot volume", lambda s: s.volume, "mL", field="volume"),
+    ShotValue("last_shot_flow_rate", "Last shot flow rate", lambda s: s.flow_rate, "mL/s", field="volume"),
+    ShotValue("last_shot_boiler_temperature", "Last shot boiler temperature", lambda s: s.boiler_temperature,
+              "°C", SensorDeviceClass.TEMPERATURE, "temperature_pid1"),
+    ShotValue("last_shot_weight", "Last shot weight", lambda s: s.weight, "g", SensorDeviceClass.WEIGHT, "weight"),
+    ShotValue("last_shot_peak_pressure", "Last shot peak pressure", lambda s: s.peak_pressure, "bar",
+              SensorDeviceClass.PRESSURE, "pressure"),
+    ShotValue("last_shot_profile", "Last shot profile", lambda s: s.profile, field="selected_profile"),
+)
+
+
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
     leva = entry.runtime_data
+    keys = {f.key for f in leva.fields}
     async_add_entities([ModeSensor(leva), ProgramSensor(leva), ProgramEndSensor(leva), AlertSensor(leva),
-                        DisplaySensor(leva)] + [LevaSensor(leva, f) for f in leva.fields if f.key not in SKIP])
+                        DisplaySensor(leva)] + [LevaSensor(leva, f) for f in leva.fields if f.key not in SKIP]
+                       + [LastShotSensor(leva, d) for d in SHOT_VALUES if d.field is None or d.field in keys])
 
 
 class LevaSensor(LevaEntity, SensorEntity):
@@ -118,3 +152,32 @@ class DisplaySensor(LevaDisplayEntity, SensorEntity):
     def extra_state_attributes(self):
         d = self.leva.display
         return {"lines": list(d.lines), "backlight": d.backlight} if d else None
+
+
+class LastShotSensor(LevaEntity, RestoreSensor):
+    """One value of the last shot. Keeps it while the machine is off and across restarts."""
+
+    def __init__(self, leva, desc: ShotValue) -> None:
+        super().__init__(leva, desc.key, desc.name)
+        self.desc = desc
+        self._attr_device_class = desc.device_class
+        self._attr_native_unit_of_measurement = desc.unit
+        if desc.unit:
+            self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_native_value = None
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    async def async_added_to_hass(self) -> None:
+        if self.leva.last_shot:
+            self._attr_native_value = self.desc.value(self.leva.last_shot)
+        elif (last := await self.async_get_last_sensor_data()) is not None:
+            self._attr_native_value = last.native_value
+        self.async_on_remove(async_dispatcher_connect(self.hass, self.leva.shot_signal, self._on_shot))
+
+    @callback
+    def _on_shot(self) -> None:
+        self._attr_native_value = self.desc.value(self.leva.last_shot)
+        self.async_write_ha_state()

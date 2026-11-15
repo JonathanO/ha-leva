@@ -45,8 +45,15 @@ names and units from that file. Without the matching file setup stops and asks f
 - Buttons **Wake**, **Eco**, **Standby**. These need
   *Setup → Wifi → Permissions → Serial menu* enabled in leva!, which lets every device on your
   LAN control pump and heating. Leave it off if you only want readings.
-- Event `leva_brew_finished` when the pump stops: `duration`, `weight`, `volume`,
-  `peak_pressure`, `profile`. Filter shots from flushes by weight or duration.
+- **Last shot** sensors: when it finished (timestamp), duration, volume, average flow rate
+  (volume / duration), average boiler temperature, weight and peak pressure when the pump
+  stopped, profile. A pump run counts as a shot when it lasts at least 12 s and no run-menu
+  program (warm-up pulses, flush, descale, …) is on the display. They keep their values while
+  the machine is off and across restarts. Weight, pressure and volume ones exist only when the
+  XML has the field, and stay `unknown` without a scale or pressure sensor.
+- Event `leva_brew_finished` when the pump stops, for every pump run: `duration`, `weight`,
+  `volume`, `peak_pressure`, `profile`, `shot` (counted as a shot, as above) and `program`
+  (the program on the display while it ran, or none).
 - *Download diagnostics* on the device page includes the machine's full setup menu (PID
   settings, pressure profiles, doses) next to the current readings. The module's Wi-Fi
   bridge drops parts of the dump when the link stalls, so it is read up to three times

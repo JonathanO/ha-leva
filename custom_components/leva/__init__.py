@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from homeassistant.config_entries import ConfigEntry
@@ -27,6 +28,21 @@ EVENT_BREW_FINISHED = "leva_brew_finished"
 DISPLAY_STALE_S = 10  # display entities go unavailable this long after the last display line
 ALERT_HOLD_S = 10     # alerts blink on the OLED: keep one active this long after it was last seen
 END_JITTER_S = 2      # program end moves only when the countdown disagrees by more than this
+MIN_SHOT_S = 12       # shorter pump runs are flushes, purges or warm-up pulses (one is ~10.3 s)
+
+
+@dataclass(frozen=True)
+class Shot:
+    """Summary of the last pump run that counted as a shot (see Leva._track_brew)."""
+
+    end: datetime
+    duration: float  # s
+    volume: float | None  # mL of water through the flow meter
+    flow_rate: float | None  # mL/s, volume / duration
+    boiler_temperature: float | None  # °C, average while brewing
+    weight: float | None  # g, scale reading when the pump stopped
+    peak_pressure: float | None  # bar
+    profile: str | None
 
 
 def load_fields(path: str) -> list[Field] | None:
@@ -42,9 +58,11 @@ class Leva:
         self.hass, self.entry, self.fields, self.xml = hass, entry, fields, xml
         self.signal = f"{DOMAIN}_{entry.entry_id}"
         self.display_signal = f"{self.signal}_display"
+        self.shot_signal = f"{self.signal}_shot"
         self.frame: Frame | None = None
         self.available = False
         self._brew: dict | None = None
+        self.last_shot: Shot | None = None  # since setup; the sensors restore older ones
         # From the OLED (display peeks): None while no display line arrived lately.
         self.display: Display | None = None
         self.program_end: datetime | None = None
@@ -107,22 +125,42 @@ class Leva:
         self.hass.config_entries.async_schedule_reload(self.entry.entry_id)
 
     def _track_brew(self, fr: Frame) -> None:
-        """Fire an event when the pump / brew program stops. Covers shots and flushes alike;
-        filter on weight or duration in the automation."""
+        """Fire an event when the pump / brew program stops, for shots, flushes and warm-up
+        pulses alike; `shot` tells them apart. A shot also becomes `last_shot`."""
+        v = fr.values
         if fr.brewing:
-            if self._brew is None:
-                self._brew = {"start": time.monotonic(), "peak": 0.0}
-            self._brew["peak"] = max(self._brew["peak"], fr.values.get("pressure") or 0)
+            if (b := self._brew) is None:
+                b = self._brew = {"start": time.monotonic(), "peak": None, "temps": [], "program": None}
+            if (p := v.get("pressure")) is not None:
+                b["peak"] = max(b["peak"] or 0.0, p)
+            if (t := v.get("temperature_pid1")) is not None:
+                b["temps"].append(t)
+            # Pump runs inside a run-menu program (warm-up pulses, flush, descale) are no shots.
+            b["program"] = b["program"] or (self.display.program if self.display else None)
         elif self._brew:
             b, self._brew = self._brew, None
+            duration = round(time.monotonic() - b["start"], 1)
+            volume = v.get("volume")
+            shot = duration >= MIN_SHOT_S and not b["program"]
             self.hass.bus.async_fire(EVENT_BREW_FINISHED, {
                 "entry_id": self.entry.entry_id,
-                "duration": round(time.monotonic() - b["start"], 1),
-                "weight": fr.values.get("weight"),
-                "volume": fr.values.get("volume"),
-                "peak_pressure": b["peak"],
-                "profile": fr.values.get("selected_profile"),
+                "duration": duration,
+                "weight": v.get("weight"),
+                "volume": volume,
+                "peak_pressure": b["peak"] or 0.0,
+                "profile": v.get("selected_profile"),
+                "shot": shot,
+                "program": b["program"].lower() if b["program"] else None,
             })
+            if shot:
+                temps = b["temps"]
+                self.last_shot = Shot(
+                    end=dt_util.utcnow(), duration=duration, volume=volume,
+                    flow_rate=round(volume / duration, 2) if volume is not None else None,
+                    boiler_temperature=round(sum(temps) / len(temps), 1) if temps else None,
+                    weight=v.get("weight"), peak_pressure=b["peak"],
+                    profile=v.get("selected_profile"))
+                async_dispatcher_send(self.hass, self.shot_signal)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
