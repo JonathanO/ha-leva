@@ -7,11 +7,12 @@ import pytest
 from homeassistant import config_entries
 from homeassistant.components.repairs import repairs_flow_manager
 from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.core import State
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry, mock_restore_cache_with_extra_data
 
 import custom_components.leva.client as client
 
@@ -24,6 +25,7 @@ TEST_XML = b"""<?xml version="1.0"?><cfg><values>
 <value at="13" len="5" export="Setpoint PID" type="float" unit="&#xb0;C"/>
 <value at="18" len="3" export="Heat PID" type="int" unit="%"/>
 <value at="53" len="5" export="Kc PID" type="float" unit="%/&#xb0;"/>
+<value at="152" len="3" export="Volume" type="int" unit="ml"/>
 <value at="197" len="5" export="Pressure" type="float" unit="bar"/>
 <value at="226" len="5" export="Weight" type="float" unit="g"/>
 <value at="231" len="5" export="Flow rate" type="float" unit="g/s"/>
@@ -35,7 +37,7 @@ TEST_XML = b"""<?xml version="1.0"?><cfg><values>
 </values></cfg>"""
 NEW_XML = (b'<?xml version="1.0"?><cfg><values>'
            b'<value at="7" len="6" export="Temperature PID1" type="float" unit="&#xb0;C"/></values></cfg>')
-VALUES = {7: "090.15", 13: "090.0", 18: "017", 197: "08.22", 226: "042.1", 231: "03.12",
+VALUES = {7: "090.15", 13: "090.0", 18: "017", 152: "088", 197: "08.22", 226: "042.1", 231: "03.12",
           236: "     9BAR", 245: "GEN.LEVER", 254: " " * 9, 263: " " * 9, 272: "GEN.LEVER"}
 TEMP = "sensor.espresso_machine_boiler_temperature"
 SETUP_DUMP = ["PID 1...", "| Control     PID", "| Setpoint  90.0°", "$id: leva! (3.3)",
@@ -423,4 +425,71 @@ async def test_display_lost(hass, ito, monkeypatch) -> None:
     ito.streaming = False
     await wait_for(lambda: hass.states.get("sensor.mock_title_program").state == "unavailable")
     assert hass.states.get("binary_sensor.mock_title_water_tank_empty").state == "unavailable"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def brew(hass, ito, seconds: float) -> dict:
+    """Run the pump for `seconds`, return the leva_brew_finished data."""
+    events = []
+    unsub = hass.bus.async_listen("leva_brew_finished", lambda e: events.append(e.data))
+    ito.flag = "*"
+    await wait_for(lambda: hass.states.get("binary_sensor.mock_title_brewing").state == "on")
+    await asyncio.sleep(seconds)
+    ito.flag = "-"
+    await wait_for(lambda: events)
+    unsub()
+    return events[0]
+
+
+async def test_last_shot(hass, ito, monkeypatch) -> None:
+    """A long enough pump run outside a program is a shot; flushes and warm-up pulses are not."""
+    import custom_components.leva as leva
+
+    monkeypatch.setattr(leva, "MIN_SHOT_S", 0.5)
+    monkeypatch.setattr(client, "PEEK_S", 0.2)
+    entry = await setup(hass, ito.port)
+    await wait_for(lambda: hass.states.get("sensor.mock_title_program").state == "none")
+    assert hass.states.get("sensor.mock_title_last_shot").state == "unknown"
+
+    flush = await brew(hass, ito, 0)
+    assert flush["shot"] is False and flush["program"] is None
+    assert hass.states.get("sensor.mock_title_last_shot").state == "unknown"
+
+    shot = await brew(hass, ito, 0.8)
+    assert shot["shot"] is True and shot["volume"] == 88
+    ended = dt_util.parse_datetime(hass.states.get("sensor.mock_title_last_shot").state)
+    assert abs((dt_util.utcnow() - ended).total_seconds()) < 2
+    duration = float(hass.states.get("sensor.mock_title_last_shot_duration").state)
+    assert duration == shot["duration"] >= 0.5
+    assert float(hass.states.get("sensor.mock_title_last_shot_volume").state) == 88
+    assert float(hass.states.get("sensor.mock_title_last_shot_flow_rate").state) == round(88 / duration, 2)
+    assert hass.states.get("sensor.mock_title_last_shot_boiler_temperature").state == "90.2"  # rounded mean
+    assert hass.states.get("sensor.mock_title_last_shot_weight").state == "42.1"
+    assert hass.states.get("sensor.mock_title_last_shot_peak_pressure").state == "8.22"
+    assert hass.states.get("sensor.mock_title_last_shot_profile").state == "GEN.LEVER"
+
+    ito.screen = WARM_UP
+    await wait_for(lambda: hass.states.get("sensor.mock_title_program").state == "warm-up")
+    pulse = await brew(hass, ito, 0.8)
+    assert pulse["shot"] is False and pulse["program"] == "warm-up"
+    assert dt_util.parse_datetime(hass.states.get("sensor.mock_title_last_shot").state) == ended
+
+    # Machine off: the last shot stays.
+    ito.streaming = ito.display_mode = False
+    await wait_for(lambda: hass.states.get("sensor.mock_title_boiler_temperature").state == "unavailable", 8)
+    assert hass.states.get("sensor.mock_title_last_shot_duration").state == str(duration)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_last_shot_restored(hass, ito) -> None:
+    mock_restore_cache_with_extra_data(hass, [
+        (State("sensor.mock_title_last_shot_duration", "27.5"),
+         {"native_value": 27.5, "native_unit_of_measurement": "s"}),
+        (State("sensor.mock_title_last_shot", "2026-11-15T11:35:00+00:00"),
+         {"native_value": {"__type": "<class 'datetime.datetime'>", "isoformat": "2026-11-15T11:35:00+00:00"},
+          "native_unit_of_measurement": None}),
+    ])
+    entry = await setup(hass, ito.port)
+    assert hass.states.get("sensor.mock_title_last_shot_duration").state == "27.5"
+    assert hass.states.get("sensor.mock_title_last_shot").state == "2026-11-15T11:35:00+00:00"
     assert await hass.config_entries.async_unload(entry.entry_id)
