@@ -7,6 +7,7 @@ Behaviour of the module, largely learned from leva2mqtt's captures:
   re-send it while no frames arrive
 - after a power cut the module never closes the socket: a read timeout is the only sign
 - at most 4 connections, each with a 5 min inactivity timeout: always close before reconnecting
+- `MCR` (report once) also switches back to continuous report frames on leva! 3.3
 """
 from __future__ import annotations
 
@@ -27,6 +28,11 @@ FOREIGN_S = 120     # ...but this rarely while display frames show another clien
 KEEPALIVE_S = 60
 RETRY_S = 5
 DUMP_QUIET_S = 3    # setup dump is over after this long without a line (Wi-Fi stalls ~1 s seen)
+# Display peek: `MC@`, take the first display line, `MCr` again. The module answers each within
+# ~100 ms and resends the last report frame on `MCr`, so the 4/s report keeps its cadence.
+PEEK_S = 2          # peek this often while report frames flow
+PEEK_TIMEOUT_S = 1  # no display line after MC@ -> switch back anyway
+PEEK_TAIL_S = 0.5   # display lines still in flight after our MCr are ours, not another client's
 
 
 async def _open(host: str, port: int):
@@ -58,11 +64,14 @@ async def probe(host: str, port: int) -> str | None:
 class Client:
     def __init__(self, host: str, port: int, xml: str, fields: list[Field],
                  on_frame: Callable[[Frame], None], on_stale: Callable[[], None],
-                 on_xml: Callable[[str], None]) -> None:
+                 on_xml: Callable[[str], None], on_display: Callable[[str], None]) -> None:
         """xml: firmware name `fields` belong to. Frames are only decoded once the module has
-        confirmed that name on the current connection; another name calls on_xml."""
+        confirmed that name on the current connection; another name calls on_xml. on_display
+        gets raw display lines: from our own peeks, or all of them while another client
+        (Virtual Display, Status Monitor's Virtual LCD) holds the display mode."""
         self.host, self.port, self.xml, self.fields = host, port, xml, fields
         self._on_frame, self._on_stale, self._on_xml = on_frame, on_stale, on_xml
+        self._on_display = on_display
         self._writer: asyncio.StreamWriter | None = None
         self._dump: list[str] | None = None  # collects other lines while dump_setup runs
         self._dump_lock = asyncio.Lock()  # one dump at a time (e.g. repeated diagnostics clicks)
@@ -109,7 +118,9 @@ class Client:
         self.send("MC?")
         self.send("MCr")
         last_mcr = last_mcq = last_tx = now
-        last_frame = last_display = 0.0
+        last_frame = last_display = peek_end = 0.0
+        last_peek = now
+        peek_at: float | None = None  # MC@ sent, waiting for the display line
         confirmed = False  # firmware name checked on this connection (may have been reflashed)
         while True:
             raw = await asyncio.wait_for(reader.readline(), WATCHDOG_S)
@@ -122,7 +133,17 @@ class Client:
                     last_frame = now
                     self._on_frame(frame)
             elif line.startswith("<"):
-                last_display = now
+                if self._dump is not None:
+                    pass  # the dump's own MCr ends any peek
+                elif peek_at is not None:  # answer to our peek: back to the report at once
+                    self.send("MCr")
+                    peek_at, peek_end, last_mcr, last_tx = None, now, now, now
+                    if confirmed:
+                        self._on_display(line)
+                elif now - peek_end > PEEK_TAIL_S:  # another client holds the display mode
+                    last_display = now
+                    if confirmed:
+                        self._on_display(line)
             elif line.startswith("XML="):
                 name = line[4:].strip()
                 confirmed = name == self.xml
@@ -135,6 +156,15 @@ class Client:
                 # A setup dump pauses the report: send nothing until it ends (any command
                 # interleaves with the dump on the shared serial line), and don't call it stale.
                 last_frame = last_tx = last_mcq = now
+                peek_at, last_peek = None, now
+            if peek_at is not None and now - peek_at > PEEK_TIMEOUT_S:
+                self.send("MCr")
+                peek_at, peek_end, last_mcr, last_tx = None, now, now, now
+            elif (peek_at is None and confirmed and now - last_frame < 1 and now - last_display > STALE_S
+                  and now - last_peek > PEEK_S):
+                # Only while our report flows: never take the mode from another client.
+                self.send("MC@")
+                peek_at = last_peek = last_tx = now
             if now - last_frame > STALE_S:
                 self._on_stale()
                 # Display frames = someone (Virtual Display / Companion app) switched the

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 
-from .entity import LevaEntity
+from .entity import LevaDisplayEntity, LevaEntity
 from .protocol import Field
 
 DEVICE_CLASS = {"°C": SensorDeviceClass.TEMPERATURE, "bar": SensorDeviceClass.PRESSURE,
@@ -28,7 +28,8 @@ MODES = {"PID": "on", "ECO": "eco", "OFF": "off", "CLD": "cold", "ATN": "autotun
 
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
     leva = entry.runtime_data
-    async_add_entities([ModeSensor(leva)] + [LevaSensor(leva, f) for f in leva.fields if f.key not in SKIP])
+    async_add_entities([ModeSensor(leva), ProgramSensor(leva), ProgramEndSensor(leva), AlertSensor(leva),
+                        DisplaySensor(leva)] + [LevaSensor(leva, f) for f in leva.fields if f.key not in SKIP])
 
 
 class LevaSensor(LevaEntity, SensorEntity):
@@ -56,3 +57,64 @@ class ModeSensor(LevaEntity, SensorEntity):
     @property
     def native_value(self):
         return MODES.get(self.leva.frame.mode) if self.leva.frame else None
+
+
+class ProgramSensor(LevaDisplayEntity, SensorEntity):
+    """Title of the program counting down on the OLED (warm-up, flush, ...), `none` otherwise."""
+
+    def __init__(self, leva) -> None:
+        super().__init__(leva, "program", "Program")
+
+    @property
+    def native_value(self):
+        d = self.leva.display
+        return (d.program or "none").lower() if d else None
+
+
+class ProgramEndSensor(LevaDisplayEntity, SensorEntity):
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, leva) -> None:
+        super().__init__(leva, "program_end", "Program end")
+
+    @property
+    def native_value(self):
+        return self.leva.program_end
+
+
+class AlertSensor(LevaDisplayEntity, SensorEntity):
+    """Runtime alert shown on the OLED (refill, backfl, ...), `none` otherwise. Alerts blink, so
+    each stays active for a few seconds after it was last seen; all active ones are listed."""
+
+    _unrecorded_attributes = frozenset({"active"})
+
+    def __init__(self, leva) -> None:
+        super().__init__(leva, "alert", "Alert")
+
+    @property
+    def native_value(self):
+        return self.leva.alerts[0].lower() if self.leva.alerts else "none"
+
+    @property
+    def extra_state_attributes(self):
+        return {"active": [a.lower() for a in self.leva.alerts]}
+
+
+class DisplaySensor(LevaDisplayEntity, SensorEntity):
+    """OLED contents: title as state, the four lines as (unrecorded) attributes."""
+
+    _attr_entity_registry_enabled_default = False
+    _unrecorded_attributes = frozenset({"lines", "backlight"})
+
+    def __init__(self, leva) -> None:
+        super().__init__(leva, "display", "Display")
+
+    @property
+    def native_value(self):
+        d = self.leva.display
+        return (d.lines[0].strip() or None) if d else None
+
+    @property
+    def extra_state_attributes(self):
+        d = self.leva.display
+        return {"lines": list(d.lines), "backlight": d.backlight} if d else None

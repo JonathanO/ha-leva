@@ -34,6 +34,14 @@ names and units from that file. Without the matching file setup stops and asks f
   (`on`, `eco`, `standby`, …). PID internals and other fields from the XML exist but start
   disabled.
 - Binary sensor **Brewing**: pump / brew program running (also flushes, water through the wand).
+- From the machine's display (see Notes):
+  - **Program**: the program counting down on the display (`warm-up`, `flush`, `backflush`,
+    …), `none` otherwise. **Program end**: when it will finish (timestamp).
+  - **Alert**: runtime alert on the display (`refill`, `backfl`, `filter`, `dscale`,
+    `protect`, …), `none` otherwise; attribute `active` lists all current ones.
+  - Binary sensor **Water tank empty**: the `REFILL` alert. Needs a tank sensor
+    (*Setup → Contacts*, `TANK` function and *Tank logic*).
+  - **Display** (disabled by default): the display's title, with its four lines as attributes.
 - Buttons **Wake**, **Eco**, **Standby**. These need
   *Setup → Wifi → Permissions → Serial menu* enabled in leva!, which lets every device on your
   LAN control pump and heating. Leave it off if you only want readings.
@@ -46,9 +54,14 @@ names and units from that file. Without the matching file setup stops and asks f
 
 ## Notes
 
-- The report mode is global for the module. If the Virtual Display / Companion app switches
-  it to display mode, entities go unavailable and the integration asks for `MCr` again
-  after 2 minutes.
+- The report mode is global for the module. The report has no program, countdown or alerts,
+  so every 2 s the integration switches to display frames (`MC@`) for one line and back
+  (`MCr`), about 0.2 s, without losing readings. Other clients get an occasional display line
+  and a repeated report frame in between.
+- If the Virtual Display / Companion app (or the Status Monitor's Virtual LCD) switches the
+  module to display mode, the integration leaves it there: the report entities go
+  unavailable, the display entities keep updating from that app's display frames, and
+  `MCr` is requested again after 2 minutes.
 - Sending commands to your machine is at your own risk.
 
 ## Development

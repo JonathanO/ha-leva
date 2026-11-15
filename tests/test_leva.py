@@ -10,6 +10,7 @@ from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant.common import MockConfigEntry
 
 import custom_components.leva.client as client
@@ -41,6 +42,16 @@ SETUP_DUMP = ["PID 1...", "| Control     PID", "| Setpoint  90.0°", "$id: leva!
               "<0012Auto save" + " " * 52 + ">"]
 
 
+def screen(*lines: str, flags: str = "002") -> str:
+    """Display line as `MC@` sends it: flags + four 16-char lines."""
+    return "<" + flags + "".join(f"{s:<16}" for s in (*lines, "", "", "")[:4]) + ">"
+
+
+IDLE = screen("PROFILE:-", "1: 93.1\xdf \x04 93.0\xdf", "\x01            5%", " 0.0b   1s 178ml")
+HEATING = screen("WARM-UP", "1:109.4\xdf \x04110.0\xdf", "\x03" * 12 + "100%", " 0.0b   1s   0ml", flags="102")
+WARM_UP = screen("WARM-UP", "04m:41s   REFILL", "\x03\x03       28%", "0.0b  3s  41ml")
+
+
 def frame(flag: str = "-") -> bytes:
     body = list("{ " + flag + "1PID" + "?" * 277)
     for at, s in VALUES.items():
@@ -50,10 +61,12 @@ def frame(flag: str = "-") -> bytes:
 
 
 class FakeIto:
-    """Answers MC? with self.xml, streams frames after MCr, records commands."""
+    """Answers MC? with self.xml, streams frames after MCr or self.screen after MC@ (the mode
+    is global, like the module's), records commands."""
 
     def __init__(self) -> None:
         self.xml, self.flag, self.streaming = FIRMWARE, "-", False
+        self.screen, self.display_mode = IDLE, False
         self.dump_delay = 0.01  # seconds between setup dump lines
         self.dumps: list[list[str]] = []  # per-MCu dump contents (lossy variants); default SETUP_DUMP
         self.received: list[str] = []
@@ -63,7 +76,9 @@ class FakeIto:
     async def handle(self, reader, writer) -> None:
         async def stream():
             while True:
-                if self.streaming:
+                if self.display_mode:
+                    writer.write(self.screen.encode("latin-1") + b"\r\n")
+                elif self.streaming:
                     writer.write(frame(self.flag))
                 await asyncio.sleep(0.05)
 
@@ -75,10 +90,13 @@ class FakeIto:
                 self.received.append(cmd)
                 if cmd == "MC?":
                     writer.write(f"XML={self.xml}\r\n".encode())
-                elif cmd == "MCr":
-                    self.streaming = True
+                elif cmd == "MCr":  # resends the last frame at once
+                    self.streaming, self.display_mode = True, False
+                    writer.write(frame(self.flag))
+                elif cmd == "MC@":
+                    self.display_mode = True
                 elif cmd == "MCu":  # setup dump interrupts the report
-                    self.streaming = False
+                    self.streaming = self.display_mode = False
                     for dump_line in self.dumps.pop(0) if self.dumps else SETUP_DUMP:
                         writer.write(dump_line.encode("latin-1") + b"\r\n")
                         await asyncio.sleep(self.dump_delay)
@@ -104,6 +122,7 @@ async def ito():
 @pytest.fixture(autouse=True)
 def fast_dump_end(monkeypatch):
     monkeypatch.setattr(client, "DUMP_QUIET_S", 0.3)
+    monkeypatch.setattr(client, "PEEK_S", 1000)  # no display peeks unless a test wants them
 
 
 @pytest.fixture(autouse=True)
@@ -339,4 +358,69 @@ async def test_lossy_dumps(hass, ito) -> None:
     ito.dumps = [FULL[:2], FULL[1:], FULL[:3]]  # never two alike: longest, flagged
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert (diag["setup"], diag["setup_complete"], diag["setup_tries"]) == (FULL[1:], False, 3)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_display_peek(hass, ito, monkeypatch) -> None:
+    """Program, countdown and alerts come from short display peeks; readings keep flowing."""
+    import custom_components.leva as leva
+
+    monkeypatch.setattr(client, "PEEK_S", 0.2)
+    monkeypatch.setattr(leva, "ALERT_HOLD_S", 0.5)
+    ito.screen = HEATING
+    entry = await setup(hass, ito.port)
+    program = "sensor.mock_title_program"
+    await wait_for(lambda: (s := hass.states.get(program)) and s.state == "warm-up")
+    assert hass.states.get("sensor.mock_title_program_end").state == "unknown"  # not timed yet
+    ito.screen = WARM_UP
+    await wait_for(lambda: hass.states.get("sensor.mock_title_program_end").state != "unknown")
+    end = dt_util.parse_datetime(hass.states.get("sensor.mock_title_program_end").state)
+    assert abs((end - dt_util.utcnow()).total_seconds() - 281) < 3
+    assert hass.states.get("sensor.mock_title_alert").state == "refill"
+    assert hass.states.get("binary_sensor.mock_title_water_tank_empty").state == "on"
+    assert hass.states.get("sensor.mock_title_display") is None  # disabled by default
+    assert entry.runtime_data.display.lines[1] == "04m:41s   REFILL"
+
+    # Each peek is MC@ then MCr, and the report never went stale.
+    await wait_for(lambda: ito.received.count("MC@") >= 4)
+    sent = [c for c in ito.received if c in ("MC@", "MCr")]
+    assert sent[1:7] == ["MC@", "MCr"] * 3, sent
+    assert hass.states.get("sensor.mock_title_boiler_temperature").state == "90.15"
+
+    ito.screen = IDLE
+    await wait_for(lambda: hass.states.get(program).state == "none")
+    assert hass.states.get("sensor.mock_title_program_end").state == "unknown"
+    await wait_for(lambda: hass.states.get("binary_sensor.mock_title_water_tank_empty").state == "off")
+    assert hass.states.get("sensor.mock_title_alert").state == "none"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_foreign_display_mode_is_left_alone(hass, ito, monkeypatch) -> None:
+    """Another client (Virtual Display) switched the module to display frames: read them,
+    but neither peek nor send MCr to take the mode back."""
+    monkeypatch.setattr(client, "PEEK_S", 1)
+    entry = await setup(hass, ito.port)
+    await wait_for(lambda: hass.states.get("sensor.mock_title_program").state == "none")
+    await wait_for(lambda: ito.received[-1] == "MCr" and not ito.display_mode)  # between peeks
+    ito.screen, ito.display_mode = WARM_UP, True
+    await wait_for(lambda: hass.states.get("sensor.mock_title_program").state == "warm-up")
+    n = len(ito.received)
+    await wait_for(lambda: hass.states.get("sensor.mock_title_boiler_temperature").state == "unavailable", 5)
+    await asyncio.sleep(0.5)
+    assert ito.received[n:] == [] and ito.display_mode
+    assert hass.states.get("binary_sensor.mock_title_water_tank_empty").state == "on"
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+
+async def test_display_lost(hass, ito, monkeypatch) -> None:
+    """No display line for a while (power cut): display entities go unavailable."""
+    import custom_components.leva as leva
+
+    monkeypatch.setattr(client, "PEEK_S", 0.2)
+    monkeypatch.setattr(leva, "DISPLAY_STALE_S", 0.5)
+    entry = await setup(hass, ito.port)
+    await wait_for(lambda: hass.states.get("sensor.mock_title_program").state == "none")
+    ito.streaming = False
+    await wait_for(lambda: hass.states.get("sensor.mock_title_program").state == "unavailable")
+    assert hass.states.get("binary_sensor.mock_title_water_tank_empty").state == "unavailable"
     assert await hass.config_entries.async_unload(entry.entry_id)
