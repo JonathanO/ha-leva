@@ -33,3 +33,15 @@ class LevaEntity(Entity):
 
     async def async_added_to_hass(self) -> None:
         self.async_on_remove(async_dispatcher_connect(self.hass, self.leva.signal, self.async_write_ha_state))
+
+
+class LevaDisplayEntity(LevaEntity):
+    """Reads the OLED contents (display peeks), not the report frames."""
+
+    @property
+    def available(self) -> bool:
+        return self.leva.display is not None
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(async_dispatcher_connect(
+            self.hass, self.leva.display_signal, self.async_write_ha_state))

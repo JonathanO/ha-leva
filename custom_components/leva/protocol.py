@@ -99,6 +99,55 @@ def parse(line: str, fields: list[Field]) -> Frame | None:
         f.key: _value(line[f.at:f.at + f.len], f) if f.at + f.len <= end else None for f in fields})
 
 
+# Display frames (`MC@`, ito manual "Creating compatible firmware"): `<BKL` + four 16-char
+# lines + `>`. B backlight, K button, L layout (2 = bold title + 3 lines, the main screen).
+# OLED glyphs: 0xDF degree sign, 0x04 arrow before a program-controlled setpoint, low codes
+# draw the heat bargraph.
+_GLYPHS = {"\xdf": "°", "\x04": "►"}
+# Runtime alerts from the leva! firmware manual; shown in place of the setpoint, blinking.
+ALERTS = ("SETUP", "PROTECT", "FLWMTR", "FILTER", "DSCALE", "BACKFL", "REFILL", "NO SNS", "GAUGE",
+          "SCALE", "BLE OFF", "VALVE")
+_ALERT_RE = re.compile(r"(?<![A-Z])(" + "|".join(sorted(map(re.escape, ALERTS), key=len, reverse=True)) + r")(?![A-Z])")
+# Countdown of a running program at the start of line 2: "04m:41s" (or "1h:05m").
+_COUNTDOWN_RE = re.compile(r"^\s*(\d{1,2})([hm]):(\d\d)([ms])")
+# Programs of the run menu. The title shows the name for the whole program; line 2 shows a
+# countdown only in timed phases (warm-up first heats to its boost temperature, untimed).
+# Any other title shown with a countdown counts as a program too.
+PROGRAMS = ("WARM-UP", "FLUSH", "PURGE", "DESCALE", "BACKFLUSH", "AUTOTUNE")
+
+
+@dataclass(frozen=True)
+class Display:
+    backlight: bool
+    layout: str
+    lines: tuple[str, ...]  # four lines, glyphs mapped to text
+    program: str | None  # title while a program counts down
+    time_left: int | None  # seconds
+    alerts: tuple[str, ...]
+
+
+def _text(raw: str) -> str:
+    return "".join(_GLYPHS.get(c, "▮" if c < " " else c) for c in raw)
+
+
+def parse_display(line: str) -> Display | None:
+    """Decode one `<...>` display line, None if it is not a valid one."""
+    if len(line) != 69 or line[0] != "<" or line[-1] != ">":
+        return None
+    raw = [line[4 + 16 * i:20 + 16 * i] for i in range(4)]
+    lines = tuple(_text(r).rstrip() for r in raw)
+    time_left = program = None
+    title = lines[0].strip()
+    if line[3] == "2" and (m := _COUNTDOWN_RE.match(raw[1])) and m[2] + m[4] in ("ms", "hm"):
+        scale = 60 if m[2] == "m" else 3600
+        time_left = int(m[1]) * scale + int(m[3]) * scale // 60
+        program = title or None
+    elif line[3] == "2" and title in PROGRAMS:
+        program = title
+    alerts = tuple(dict.fromkeys(_ALERT_RE.findall(raw[1]))) if line[3] == "2" else ()
+    return Display(line[1] == "1", line[3], lines, program, time_left, alerts)
+
+
 if __name__ == "__main__":
     # Hand-made test layout (not a vendor file): fixed-width fields in a 289-char frame.
     xml = """<?xml version="1.0"?><cfg><values>
@@ -139,4 +188,18 @@ if __name__ == "__main__":
     assert sv["temperature_pid1"] == 90.15 and sv["pressure"] is None and sv["weight"] is None
     standby = parse(build({}, mode="???"), fields)
     assert standby and standby.mode is None and not standby.brewing
+
+    def screen(*lines: str, flags="002") -> str:
+        return "<" + flags + "".join(f"{s:<16}"[:16] for s in (*lines, "", "", "")[:4]) + ">"
+
+    idle = parse_display(screen("PROFILE:-", "1: 93.1\xdf \x04 93.0\xdf", "\x01            5%", " 0.0b   1s 178ml"))
+    assert idle and idle.lines[1] == "1: 93.1° ► 93.0°" and idle.lines[2].startswith("▮")
+    assert idle.program is None and idle.time_left is None and idle.alerts == () and not idle.backlight
+    warm = parse_display(screen("WARM-UP", "04m:41s   BACKFL", "\x03\x03       28%", "0.0b  3s  41ml"))
+    assert warm and warm.program == "WARM-UP" and warm.time_left == 281 and warm.alerts == ("BACKFL",)
+    assert parse_display(screen("DESCALE", "1h:05m   REFILL")).time_left == 3900
+    heating = parse_display(screen("WARM-UP", "1:109.4\xdf \x04110.0\xdf", "\x03" * 12 + "100%"))
+    assert heating.program == "WARM-UP" and heating.time_left is None
+    assert parse_display(screen("WARM-UP", "04m:41s", flags="001")).program is None  # not the main screen
+    assert parse_display(screen("x")[:-2] + ">") is None
     print("ok")
